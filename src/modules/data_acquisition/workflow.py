@@ -5,7 +5,7 @@
 import pandas as pd
 import numpy as np
 import os
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, TypedDict
 from langgraph.graph import StateGraph, START, END
 from datetime import datetime, timedelta
 
@@ -16,18 +16,26 @@ from src.utils.storage_util import ensure_directory, save_dataframe, generate_pe
 
 logger = setup_logger("data_acquisition")
 
+def merge_dicts(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
+    return {**a, **b}
+
 # 定义工作流状态
-class DataAcquisitionState:
+class DataAcquisitionState(TypedDict):
     """数据抓取生成模块的状态类"""
+    etf_list: Optional[pd.DataFrame]
+    pe_data_dict: Dict[str, pd.DataFrame]
+    quantile_data: Dict[str, Dict[str, float]]
+    chart_paths: Dict[str, str]
+    errors: List[str]  # 这个字段是必需的
+    timestamp: str
 
-    def __init__(self):
-        self.etf_list: Optional[pd.DataFrame] = None
-        self.pe_data_dict: Dict[str, pd.DataFrame] = {}
-        self.quantile_data: Dict[str, Dict[str, float]] = {}
-        self.chart_paths: Dict[str, str] = {}
-        self.errors: List[str] = []
-        self.timestamp: str = datetime.now().strftime('%Y%m%d_%H%M%S')
-
+    # def __init__(self):
+    #     self.etf_list: Optional[pd.DataFrame] = None
+    #     self.pe_data_dict: Dict[str, pd.DataFrame] = {}
+    #     self.quantile_data: Dict[str, Dict[str, float]] = {}
+    #     self.chart_paths: Dict[str, str] = {}
+    #     self.errors: List[str] = []
+    #     self.timestamp: str = datetime.now().strftime('%Y%m%d_%H%M%S')
 
 # 定义工作流节点函数
 def fetch_etf_list_node(state: DataAcquisitionState) -> Dict[str, Any]:
@@ -36,7 +44,7 @@ def fetch_etf_list_node(state: DataAcquisitionState) -> Dict[str, Any]:
     try:
         # 使用Baostock数据源获取ETF列表
         data_source = BaostockDataSource()
-        etf_list = data_source.get_stock_etf_list()
+        etf_list = data_source.get_etf_list()
 
         # 过滤出股票型ETF
         stock_etfs = etf_list[etf_list['type'] == 'stock']
@@ -44,23 +52,25 @@ def fetch_etf_list_node(state: DataAcquisitionState) -> Dict[str, Any]:
 
         return {
             "etf_list": stock_etfs,
-            "errors": state.errors.copy()
+            "errors": state.get('errors', [])
         }
     except Exception as e:
         error_msg = f"获取ETF列表失败: {str(e)}"
         logger.error(error_msg)
-        errors = state.errors.copy()
+        errors = state.get('errors', [])
         errors.append(error_msg)
         return {"errors": errors}
+
 
 
 def fetch_pe_data_node(state: DataAcquisitionState) -> Dict[str, Any]:
     """获取PE数据节点"""
     logger.info("开始获取PE数据")
-    if state.etf_list is None or state.etf_list.empty:
+    # 使用get方法访问属性
+    if state.get('etf_list') is None or state.get('etf_list').empty:
         error_msg = "没有ETF列表数据，无法获取PE数据"
         logger.error(error_msg)
-        errors = state.errors.copy()
+        errors = state.get('errors', [])
         errors.append(error_msg)
         return {"errors": errors}
 
@@ -73,7 +83,7 @@ def fetch_pe_data_node(state: DataAcquisitionState) -> Dict[str, Any]:
         start_date = end_date - timedelta(days=365)
 
         # 批量获取PE数据
-        for _, row in state.etf_list.iterrows():
+        for _, row in state.get('etf_list', pd.DataFrame()).iterrows():
             code = row['code']
             name = row['code_name']
             try:
@@ -92,7 +102,7 @@ def fetch_pe_data_node(state: DataAcquisitionState) -> Dict[str, Any]:
         logger.info(f"成功获取{len(pe_data_dict)}个ETF的PE数据")
 
         # 保存原始数据到本地
-        raw_data_dir = os.path.join('data', 'raw', f'etf_pe_data_{state.timestamp}')
+        raw_data_dir = os.path.join('data', 'raw', f'etf_pe_data_{state.get("timestamp", "")}')
         ensure_directory(raw_data_dir)
 
         for code, data in pe_data_dict.items():
@@ -101,30 +111,31 @@ def fetch_pe_data_node(state: DataAcquisitionState) -> Dict[str, Any]:
 
         return {
             "pe_data_dict": pe_data_dict,
-            "errors": state.errors.copy()
+            "errors": state.get('errors', [])
         }
     except Exception as e:
         error_msg = f"获取PE数据失败: {str(e)}"
         logger.error(error_msg)
-        errors = state.errors.copy()
+        errors = state.get('errors', [])
         errors.append(error_msg)
         return {"errors": errors}
+
 
 
 def calculate_quantiles_node(state: DataAcquisitionState) -> Dict[str, Any]:
     """计算分位线节点"""
     logger.info("开始计算PE分位线")
-    if not state.pe_data_dict:
+    if not state.get('pe_data_dict', {}):
         error_msg = "没有PE数据，无法计算分位线"
         logger.error(error_msg)
-        errors = state.errors.copy()
+        errors = state.get('errors', [])
         errors.append(error_msg)
         return {"errors": errors}
 
     try:
         quantile_data = {}
 
-        for code, pe_data in state.pe_data_dict.items():
+        for code, pe_data in state.get('pe_data_dict', {}).items():
             # 去除NaN值
             valid_pe = pe_data['pe'].dropna()
             if len(valid_pe) > 0:
@@ -142,7 +153,7 @@ def calculate_quantiles_node(state: DataAcquisitionState) -> Dict[str, Any]:
                 quantile_data[code] = quantiles
 
         # 保存分位线数据到本地
-        processed_data_dir = os.path.join('data', 'processed', f'etf_quantile_data_{state.timestamp}')
+        processed_data_dir = os.path.join('data', 'processed', f'etf_quantile_data_{state.get("timestamp", "")}')
         ensure_directory(processed_data_dir)
 
         for code, data in quantile_data.items():
@@ -153,23 +164,24 @@ def calculate_quantiles_node(state: DataAcquisitionState) -> Dict[str, Any]:
 
         return {
             "quantile_data": quantile_data,
-            "errors": state.errors.copy()
+            "errors": state.get('errors', [])
         }
     except Exception as e:
         error_msg = f"计算分位线失败: {str(e)}"
         logger.error(error_msg)
-        errors = state.errors.copy()
+        errors = state.get('errors', [])
         errors.append(error_msg)
         return {"errors": errors}
+
 
 
 def generate_charts_node(state: DataAcquisitionState) -> Dict[str, Any]:
     """生成PE图表节点"""
     logger.info("开始生成PE指标图")
-    if not state.pe_data_dict or not state.quantile_data:
+    if not state.get('pe_data_dict', {}) or not state.get('quantile_data', {}):
         error_msg = "没有PE数据或分位线数据，无法生成图表"
         logger.error(error_msg)
-        errors = state.errors.copy()
+        errors = state.get('errors', [])
         errors.append(error_msg)
         return {"errors": errors}
 
@@ -177,17 +189,17 @@ def generate_charts_node(state: DataAcquisitionState) -> Dict[str, Any]:
         chart_paths = {}
 
         # 确保图表保存目录存在
-        chart_dir = os.path.join('data', 'visuals', f'etf_pe_charts_{state.timestamp}')
+        chart_dir = os.path.join('data', 'visuals', f'etf_pe_charts_{state.get("timestamp", "")}')
         ensure_directory(chart_dir)
 
         # 批量生成图表
-        for code, pe_data in state.pe_data_dict.items():
-            if code in state.quantile_data:
+        for code, pe_data in state.get('pe_data_dict', {}).items():
+            if code in state.get('quantile_data', {}):
                 try:
                     # 获取ETF名称
                     etf_name = None
-                    if state.etf_list is not None:
-                        etf_row = state.etf_list[state.etf_list['code'] == code]
+                    if state.get('etf_list') is not None:
+                        etf_row = state.get('etf_list')[state.get('etf_list')['code'] == code]
                         if not etf_row.empty:
                             etf_name = etf_row.iloc[0]['code_name']
 
@@ -195,7 +207,7 @@ def generate_charts_node(state: DataAcquisitionState) -> Dict[str, Any]:
                     chart_path = os.path.join(chart_dir, f'{code}_pe_chart.png')
                     generate_pe_chart(
                         pe_data=pe_data,
-                        quantile_data=state.quantile_data[code],
+                        quantile_data=state.get('quantile_data', {}).get(code, {}),
                         etf_name=etf_name or code,
                         save_path=chart_path
                     )
@@ -209,16 +221,27 @@ def generate_charts_node(state: DataAcquisitionState) -> Dict[str, Any]:
 
         return {
             "chart_paths": chart_paths,
-            "errors": state.errors.copy()
+            "errors": state.get('errors', [])
         }
     except Exception as e:
         error_msg = f"生成PE图表失败: {str(e)}"
         logger.error(error_msg)
-        errors = state.errors.copy()
+        errors = state.get('errors', [])
         errors.append(error_msg)
         return {"errors": errors}
 
 
+# 添加错误检查函数
+def check_for_errors(data: Dict[str, Any]) -> str:
+    """检查状态中是否包含错误，如果有错误则跳转到END节点"""
+    # 检查当前状态是否包含错误
+    if data.get('errors'):
+        logger.error(f"检测到错误，跳过后续节点执行: {data['errors'][-1]}")
+        return END  # 如果有错误，直接返回END节点
+    return "proceed"  # 如果没有错误，继续执行下一个节点
+
+
+# 修改工作流创建函数
 def create_data_acquisition_workflow() -> StateGraph:
     """创建数据抓取生成模块工作流"""
     workflow = StateGraph(DataAcquisitionState)
@@ -229,11 +252,37 @@ def create_data_acquisition_workflow() -> StateGraph:
     workflow.add_node("calculate_quantiles", calculate_quantiles_node)
     workflow.add_node("generate_charts", generate_charts_node)
 
-    # 定义边
+    # 定义边 - 添加条件检查
     workflow.add_edge(START, "fetch_etf_list")
-    workflow.add_edge("fetch_etf_list", "fetch_pe_data")
-    workflow.add_edge("fetch_pe_data", "calculate_quantiles")
-    workflow.add_edge("calculate_quantiles", "generate_charts")
+    
+    # 添加条件边，检查每个节点后是否有错误
+    workflow.add_conditional_edges(
+        "fetch_etf_list",
+        check_for_errors,
+        {
+            "proceed": "fetch_pe_data",  # 没有错误，继续下一个节点
+            END: END  # 有错误，直接结束
+        }
+    )
+    
+    workflow.add_conditional_edges(
+        "fetch_pe_data",
+        check_for_errors,
+        {
+            "proceed": "calculate_quantiles",
+            END: END
+        }
+    )
+    
+    workflow.add_conditional_edges(
+        "calculate_quantiles",
+        check_for_errors,
+        {
+            "proceed": "generate_charts",
+            END: END
+        }
+    )
+    
     workflow.add_edge("generate_charts", END)
 
     # 编译工作流
@@ -245,9 +294,19 @@ def run_data_acquisition_workflow() -> Dict[str, Any]:
     logger.info("启动数据抓取生成模块工作流")
 
     try:
-        # 创建并运行工作流
+
+        # 正确的初始化方式
+        init_state = {
+            "etf_list": None,
+            "pe_data_dict": {},
+            "quantile_data": {},
+            "chart_paths": {},
+            "errors": [],  # 必须包含这个字段，初始化为空列表
+            "timestamp": datetime.now().strftime('%Y%m%d_%H%M%S')
+        }
+
         app = create_data_acquisition_workflow()
-        result = app.invoke({})
+        result = app.invoke(init_state)  # 现在不会报错了
 
         # 构建返回结果
         final_result = {
