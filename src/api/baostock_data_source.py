@@ -5,7 +5,7 @@ import baostock as bs
 import pandas as pd
 from typing import List, Optional
 import logging
-from src.utils.data_source_interface import FinancialDataSource, DataSourceError, NoDataFoundError, LoginError
+from src.api.data_source_interface import FinancialDataSource, DataSourceError, NoDataFoundError, LoginError
 from src.utils.baostock_util import baostock_login_context
 
 # Get a logger instance for this module
@@ -730,6 +730,7 @@ f"Baostock API error (Basic Info) for {code}: {rs.error_msg} (code: {rs.error_co
                     )
 
                 result_df = pd.DataFrame(data_list, columns=rs.fields)
+                result_df.to_csv("/Users/forrest/code/python/etf-qim/data/all_stock.csv")
                 # 根据ETF的代码特征筛选ETF（ETF代码通常以51、15、16开头）
                 etf_df = result_df[result_df['code'].str.match(r'^(51|15|16)')]
                 logger.info(

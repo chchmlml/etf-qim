@@ -44,7 +44,7 @@ def fetch_etf_list_node(state: DataAcquisitionState) -> Dict[str, Any]:
     try:
         # 使用Baostock数据源获取ETF列表
         data_source = BaostockDataSource()
-        etf_list = data_source.get_etf_list()
+        etf_list = data_source.get_etf_list(date = '2025-10-24')
 
         # 过滤出股票型ETF
         stock_etfs = etf_list[etf_list['type'] == 'stock']
@@ -254,7 +254,7 @@ def create_data_acquisition_workflow() -> StateGraph:
 
     # 定义边 - 添加条件检查
     workflow.add_edge(START, "fetch_etf_list")
-    
+
     # 添加条件边，检查每个节点后是否有错误
     workflow.add_conditional_edges(
         "fetch_etf_list",
@@ -264,7 +264,7 @@ def create_data_acquisition_workflow() -> StateGraph:
             END: END  # 有错误，直接结束
         }
     )
-    
+
     workflow.add_conditional_edges(
         "fetch_pe_data",
         check_for_errors,
@@ -273,7 +273,7 @@ def create_data_acquisition_workflow() -> StateGraph:
             END: END
         }
     )
-    
+
     workflow.add_conditional_edges(
         "calculate_quantiles",
         check_for_errors,
@@ -282,7 +282,7 @@ def create_data_acquisition_workflow() -> StateGraph:
             END: END
         }
     )
-    
+
     workflow.add_edge("generate_charts", END)
 
     # 编译工作流
