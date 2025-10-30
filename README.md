@@ -1,4 +1,4 @@
-# etf-qim
+etf-qim
 ETF quantitative investment management
 
 
@@ -46,3 +46,22 @@ cp .env.example .env
 ```bash
 poetry run python src/main.py
 ```
+
+
+trading_strategy
+完成项目的交易策略模块
+1、整体配置文件
+strategy_config.py
+定义了总投入、最大买入基金数量、每支占比、基金分位线和回撤线
+2、买入策略：读取基金的pe数据文件 #File:
+050001_pe_data.csv
+计算基金的低分位线、高分位线，当天处于低分位线进行买入一个头寸操作；注意每支最大占比限制；
+3、卖出操作同买入操作计算基金的低分位线、高分位线，买入后基金已经突破高分位线，当天回撤达到1回撤线标准，进行清仓操作；
+4、低分位线、高分位线处于之间不操作，持有策略
+5、每个买卖策略单独一个文件，代码设计上方便后期扩展更多策略
+6、每次交易写入文件文件格式trade_transactions.csv
+trade_id,date,symbol,trade_type,price,quantity,commission,notes
+1,2023-01-10,050020,BUY,1.300,1000,0.0013,Initial purchase based on low PE
+2,2023-03-15,050020,SELL,1.450,500,0.0007,Partial sell due to PE rebound
+3,2023-05-20,050020,BUY,1.400,200,0.0003,Add to position after minor correction
+7、交易逻辑在workflow.py实现，要基于langgraph实现流​
