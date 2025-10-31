@@ -311,3 +311,54 @@ class QuantileBuyStrategy:
                 "error": str(e),
                 "timestamp": datetime.now().isoformat()
             }
+    
+    def execute_with_analysis(self,
+                             pe_analysis_result: Dict[str, Any],
+                             current_price: float,
+                             current_investment: float = 0.0,
+                             current_position: float = 0.0) -> Dict[str, Any]:
+        """使用预计算的PE分析结果执行买入策略"""
+        try:
+            logger.info(f"使用预计算PE分析结果执行买入策略: ETF代码={self.config.etf_code}, 当前价格={current_price}")
+            
+            # 获取预计算的分位点信息
+            quantile_info = pe_analysis_result
+            current_percentile = quantile_info['current_percentile']
+            
+            # 判断是否应该买入
+            if self.should_buy(current_percentile):
+                # 确定买入金额和数量
+                buy_decision = self.determine_buy_amount(
+                    current_price,
+                    current_investment,
+                    current_position,
+                    current_percentile
+                )
+                
+                if buy_decision['should_buy']:
+                    # 构建买入结果
+                    result = {
+                        "should_buy": True,
+                        "quantity": buy_decision['quantity'],
+                        "price": buy_decision['price'],
+                        "total_amount": buy_decision['total_amount'],
+                        "transaction_cost": buy_decision['transaction_cost'],
+                        "reason": f"PE分位点 {current_percentile:.2f} 低于买入阈值 {self.config.buy_quantile_threshold}",
+                        "quantiles": quantile_info,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    logger.info(f"买入决策: 买入 {buy_decision['quantity']} 份，价格 {buy_decision['price']}，总金额 {buy_decision['total_amount']:.2f}")
+                    return result
+                else:
+                    return buy_decision
+            else:
+                return {
+                    "should_buy": False,
+                    "reason": f"当前分位点 {current_percentile:.2f} 不低于买入阈值 {self.config.buy_quantile_threshold}"
+                }
+        except Exception as e:
+            logger.error(f"执行买入策略失败: {str(e)}")
+            return {
+                "should_buy": False,
+                "reason": f"策略执行错误: {str(e)}"
+            }
